@@ -1,11 +1,13 @@
 import { deleteDoc, doc } from "firebase/firestore";
 import { deleteObject, listAll, ref } from "firebase/storage";
+import { bumpCapsuleCount } from "@/lib/capsule-stats";
 import { db, storage } from "@/lib/firebase";
 import type { Capsule } from "@/lib/capsules";
 
 export async function deleteCapsule(capsule: Capsule) {
   await deleteCapsulePhotos(capsule);
   await deleteDoc(doc(db, "capsules", capsule.id));
+  await bumpCapsuleCount(-1);
 }
 
 async function deleteCapsulePhotos(capsule: Capsule) {

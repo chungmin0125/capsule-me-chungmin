@@ -1,5 +1,6 @@
 import { addDoc, collection, Timestamp } from "firebase/firestore";
 import { getDownloadURL, listAll, ref } from "firebase/storage";
+import { bumpCapsuleCount } from "@/lib/capsule-stats";
 import { db, storage } from "@/lib/firebase";
 import type { Capsule } from "@/lib/capsules";
 
@@ -45,6 +46,7 @@ export async function recoverOrphanedCapsules(
     created += 1;
   }
 
+  if (created > 0) await bumpCapsuleCount(created);
   return created;
 }
 
