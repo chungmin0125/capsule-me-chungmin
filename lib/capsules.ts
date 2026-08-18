@@ -4,7 +4,6 @@ import {
   fallbackMemory,
   lookFromContents,
   memoryFromUnknown,
-  sanitizeLook,
   type CapsuleLook,
   type CapsuleMemory,
 } from "@/lib/capsule-memory";
@@ -49,7 +48,7 @@ export function capsuleFromDoc(id: string, data: DocumentData): Capsule | null {
     storageKey: typeof data.storageKey === "string" ? data.storageKey : undefined,
     weather,
     geminiNote: typeof data.geminiNote === "string" ? data.geminiNote : null,
-    memory: memoryFromUnknown(data.memory, weather) ?? legacyMemory(id, data),
+    memory: memoryFromUnknown(data.memory, weather) ?? legacyMemory(data),
   };
 }
 
@@ -118,20 +117,21 @@ export function capsuleLook(capsule: Capsule): CapsuleLook {
 }
 
 export function capsuleMemory(capsule: Capsule): CapsuleMemory {
-  const contentsLook = lookFromContents({
+  const look = lookFromContents({
     weather: capsule.weather ?? null,
     letter: capsule.letter,
     recipient: capsule.recipient,
-    seed: capsule.id,
   });
   const stored = capsule.memory;
   if (!stored) {
-    return fallbackMemory({
-      letter: capsule.letter,
-      recipient: capsule.recipient,
-      seed: capsule.id,
-      weather: capsule.weather ?? null,
-    });
+    return {
+      ...fallbackMemory({
+        letter: capsule.letter,
+        recipient: capsule.recipient,
+        weather: capsule.weather ?? null,
+      }),
+      look,
+    };
   }
 
   return {
@@ -140,11 +140,11 @@ export function capsuleMemory(capsule: Capsule): CapsuleMemory {
       weather: capsule.weather ?? null,
     }).line,
     keywords: stored.keywords.length > 0 ? stored.keywords : [],
-    look: sanitizeLook(stored.look, contentsLook),
+    look,
   };
 }
 
-function legacyMemory(id: string, data: DocumentData): CapsuleMemory | null {
+function legacyMemory(data: DocumentData): CapsuleMemory | null {
   const line = typeof data.geminiNote === "string" ? data.geminiNote.trim() : "";
   if (!line) return null;
   return {
@@ -154,7 +154,6 @@ function legacyMemory(id: string, data: DocumentData): CapsuleMemory | null {
       weather: weatherFromUnknown(data.weather),
       letter: typeof data.letter === "string" ? data.letter : "",
       recipient: typeof data.recipient === "string" ? data.recipient : "",
-      seed: id,
     }),
   };
 }
