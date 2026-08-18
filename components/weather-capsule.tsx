@@ -1,6 +1,6 @@
 "use client";
 
-import { useId } from "react";
+import { useId, type CSSProperties } from "react";
 import {
   isDarkLook,
   type CapsuleFinish,
@@ -23,10 +23,12 @@ export function WeatherCapsule({
   look,
   size = "md",
   seed,
+  glow,
 }: {
   look: CapsuleLook;
   size?: "sm" | "md" | "lg";
   seed?: string;
+  glow?: string;
 }) {
   const uid = useId().replace(/:/g, "");
   const scale =
@@ -37,9 +39,14 @@ export function WeatherCapsule({
   const motion = floatStyle(seed ?? `${look.shape}-${look.from}-${form}`);
 
   return (
-    <div className={`relative ${scale} capsule-float`} style={motion}>
-      {size !== "sm" ? <BubbleTrail accent={look.accent} seed={motion.seed} /> : null}
-      <svg viewBox="0 0 100 180" className="relative h-full w-full" aria-hidden="true">
+    <div className={`relative ${scale} capsule-float`} style={motion.vars}>
+      <BubbleTrail accent={look.accent} seed={motion.seed} compact={size === "sm"} />
+      <svg
+        viewBox="0 0 100 180"
+        className="relative h-full w-full"
+        aria-hidden="true"
+        style={{ filter: glow ? `drop-shadow(0 10px 16px ${glow})` : undefined }}
+      >
         <defs>
           <linearGradient id={`${uid}-cap`} x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor={mixHex(look.from, "#ffffff", 0.28)} />
@@ -171,24 +178,35 @@ export function WeatherCapsule({
   );
 }
 
-function BubbleTrail({ accent, seed }: { accent: string; seed: number }) {
+function BubbleTrail({
+  accent,
+  seed,
+  compact = false,
+}: {
+  accent: string;
+  seed: number;
+  compact?: boolean;
+}) {
   const bubbles = [
-    { left: "18%", delay: "0s", ms: `${2800 + (seed % 700)}ms` },
-    { left: "58%", delay: "1.1s", ms: `${3200 + (seed % 500)}ms` },
-    { left: "36%", delay: "2s", ms: `${3600 + (seed % 400)}ms` },
+    { left: "18%", delay: "0s", ms: `${2400 + (seed % 700)}ms`, x: "4px" },
+    { left: "58%", delay: "0.8s", ms: `${2800 + (seed % 500)}ms`, x: "-6px" },
+    { left: "36%", delay: "1.6s", ms: `${3200 + (seed % 400)}ms`, x: "7px" },
   ];
 
   return (
-    <div className="pointer-events-none absolute inset-x-0 -top-2 bottom-8 overflow-hidden">
+    <div className="pointer-events-none absolute inset-x-0 -top-3 bottom-6 overflow-hidden">
       {bubbles.map((bubble) => (
         <span
           key={bubble.left}
-          className="capsule-bubble absolute bottom-6 h-1.5 w-1.5 rounded-full"
+          className={`capsule-bubble absolute bottom-5 rounded-full ${
+            compact ? "h-1 w-1" : "h-1.5 w-1.5"
+          }`}
           style={{
             left: bubble.left,
             background: accent,
             animationDuration: bubble.ms,
             animationDelay: bubble.delay,
+            ["--bubble-x" as string]: bubble.x,
           }}
         />
       ))}
@@ -224,11 +242,16 @@ function floatStyle(seed: string) {
   const n = hash(seed);
   return {
     seed: n,
-    ["--float-y" as string]: `${-8 - (n % 10)}px`,
-    ["--float-ms" as string]: `${4400 + (n % 2800)}ms`,
-    ["--float-delay" as string]: `-${n % 3200}ms`,
-    ["--float-rot-a" as string]: `${-1.2 - (n % 18) / 10}deg`,
-    ["--float-rot-b" as string]: `${1.4 + ((n >> 3) % 18) / 10}deg`,
+    vars: {
+      "--float-x": `${8 + (n % 12)}px`,
+      "--float-x-neg": `${-6 - ((n >> 2) % 10)}px`,
+      "--float-y": `${-14 - (n % 16)}px`,
+      "--float-y-mid": `${-5 - ((n >> 4) % 8)}px`,
+      "--float-ms": `${3800 + (n % 2400)}ms`,
+      "--float-delay": `-${n % 3600}ms`,
+      "--float-rot-a": `${-2.2 - (n % 18) / 10}deg`,
+      "--float-rot-b": `${2.4 + ((n >> 3) % 18) / 10}deg`,
+    } as unknown as CSSProperties,
   };
 }
 

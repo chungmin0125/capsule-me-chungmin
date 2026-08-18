@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import Link from "next/link";
 import { collection, onSnapshot, query, where } from "firebase/firestore";
 import { db } from "@/lib/firebase";
@@ -110,10 +110,10 @@ export function CapsuleDashboard() {
 }
 
 function CapsuleSea({ capsules, now }: { capsules: Capsule[]; now: number }) {
-  const hourNow = Math.floor(now / 3_600_000) * 3_600_000;
+  const minuteNow = Math.floor(now / 60_000) * 60_000;
   const spots = useMemo(
-    () => layoutCapsules(capsules, hourNow),
-    [capsules, hourNow],
+    () => layoutCapsules(capsules, minuteNow),
+    [capsules, minuteNow],
   );
 
   return (
@@ -137,6 +137,8 @@ function CapsuleSea({ capsules, now }: { capsules: Capsule[]; now: number }) {
         깊은 곳
       </p>
 
+      <SeaBubbles />
+
       {spots.map((spot) => (
         <FloatingCapsule key={spot.capsule.id} spot={spot} now={now} />
       ))}
@@ -156,17 +158,16 @@ function FloatingCapsule({
   const look = capsuleLook(capsule);
   const memory = capsuleMemory(capsule);
   const left = remainingMs(capsule, now);
+  const drift = driftStyle(capsule.id);
 
   return (
     <div
-      className="group absolute w-28 -translate-x-1/2 sm:w-32"
+      className="group capsule-drift absolute w-28 sm:w-32 transition-[top] duration-700 ease-out"
       style={{
         left: `${x}%`,
         top: `${y}%`,
         zIndex: ready ? 30 : Math.round(4 + rise * 20),
-        filter: ready
-          ? `drop-shadow(0 0 16px ${look.accent}aa)`
-          : `drop-shadow(0 10px 16px ${look.accent}55)`,
+        ...drift,
       }}
     >
       <div className="absolute -top-1 -right-1 z-20 opacity-0 transition group-hover:opacity-100">
@@ -187,8 +188,9 @@ function FloatingCapsule({
         </p>
         <WeatherCapsule
           look={look}
-          size={rise > 0.62 || ready ? "md" : "sm"}
+          size={rise > 0.55 || ready ? "md" : "sm"}
           seed={capsule.id}
+          glow={ready ? `${look.accent}aa` : `${look.accent}66`}
         />
         <p className="mt-2 max-w-full truncate text-xs font-medium text-white drop-shadow-sm">
           To. {capsule.recipient || "이름 없음"}
@@ -212,33 +214,75 @@ type CapsuleSpot = {
   rise: number;
 };
 
+const SURFACE_Y = 7;
+const NEAR_SURFACE_Y = 16;
+const DEEP_Y = 68;
+const DEEP_MS = 180 * 86_400_000;
+
 function layoutCapsules(capsules: Capsule[], now: number): CapsuleSpot[] {
-  const placed: CapsuleSpot[] = [];
-
-  for (const capsule of capsules) {
-    const rise = riseAmount(remainingMs(capsule, now));
-    let x = 12 + hash01(capsule.id) * 76;
-    let y = 12 + (1 - rise) * 60;
-
-    for (let attempt = 0; attempt < 10; attempt += 1) {
-      const hit = placed.find(
-        (spot) => Math.abs(spot.x - x) < 14 && Math.abs(spot.y - y) < 18,
-      );
-      if (!hit) break;
-      x = 12 + ((x + 17) % 76);
-      y = Math.min(74, y + 5);
-    }
-
-    placed.push({ capsule, x, y, rise });
-  }
-
-  return placed;
+  return capsules.map((capsule) => {
+    const left = remainingMs(capsule, now);
+    const depth = depthFromRemaining(left);
+    const y =
+      left <= 0
+        ? SURFACE_Y + hash01(`${capsule.id}-surface`) * 3
+        : NEAR_SURFACE_Y + depth * (DEEP_Y - NEAR_SURFACE_Y);
+    return {
+      capsule,
+      x: 14 + hash01(capsule.id) * 72,
+      y,
+      rise: 1 - depth,
+    };
+  });
 }
 
-function riseAmount(ms: number) {
-  if (ms <= 0) return 1;
-  const days = ms / 86400000;
-  return 1 / (1 + days / 12);
+function depthFromRemaining(left: number) {
+  if (left <= 0) return 0;
+  const days = left / 86_400_000;
+  return Math.min(1, Math.log1p(days) / Math.log1p(DEEP_MS / 86_400_000));
+}
+
+function SeaBubbles() {
+  const bubbles = [
+    { left: "12%", bottom: "8%", ms: "7.2s", delay: "0s", size: "0.4rem" },
+    { left: "28%", bottom: "18%", ms: "8.4s", delay: "-2.4s", size: "0.25rem" },
+    { left: "46%", bottom: "6%", ms: "6.6s", delay: "-1.1s", size: "0.35rem" },
+    { left: "63%", bottom: "22%", ms: "9.1s", delay: "-3.8s", size: "0.45rem" },
+    { left: "81%", bottom: "12%", ms: "7.8s", delay: "-5.2s", size: "0.3rem" },
+    { left: "72%", bottom: "38%", ms: "8.8s", delay: "-0.6s", size: "0.2rem" },
+    { left: "19%", bottom: "42%", ms: "10s", delay: "-4.5s", size: "0.28rem" },
+  ];
+
+  return (
+    <div className="pointer-events-none absolute inset-0 overflow-hidden">
+      {bubbles.map((bubble) => (
+        <span
+          key={`${bubble.left}-${bubble.bottom}`}
+          className="sea-bubble absolute rounded-full bg-white/50"
+          style={{
+            left: bubble.left,
+            bottom: bubble.bottom,
+            width: bubble.size,
+            height: bubble.size,
+            animationDuration: bubble.ms,
+            animationDelay: bubble.delay,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+function driftStyle(id: string): CSSProperties {
+  const n = hashInt(id, 10_000);
+  return {
+    "--drift-x": `${12 + (n % 16)}px`,
+    "--drift-x-neg": `${-12 - ((n >> 2) % 16)}px`,
+    "--drift-y": `${-18 - (n % 18)}px`,
+    "--drift-y-mid": `${-8 - ((n >> 3) % 10)}px`,
+    "--drift-ms": `${6200 + (n % 3600)}ms`,
+    "--drift-delay": `-${n % 4800}ms`,
+  } as unknown as CSSProperties;
 }
 
 function hash01(id: string) {

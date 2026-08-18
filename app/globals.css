@@ -28,39 +28,97 @@ body {
 @keyframes capsule-float {
   0%,
   100% {
-    transform: translateY(0) rotate(var(--float-rot-a, -2.2deg));
+    transform: translate3d(0, 0, 0) rotate(var(--float-rot-a, -3deg));
   }
-  50% {
-    transform: translateY(var(--float-y, -12px)) rotate(var(--float-rot-b, 2.4deg));
+  35% {
+    transform: translate3d(var(--float-x, 10px), var(--float-y, -18px), 0)
+      rotate(var(--float-rot-b, 3deg));
+  }
+  70% {
+    transform: translate3d(var(--float-x-neg, -8px), var(--float-y-mid, -7px), 0)
+      rotate(var(--float-rot-a, -3deg));
+  }
+}
+
+@keyframes capsule-drift {
+  0%,
+  100% {
+    transform: translate3d(-50%, 0, 0) rotate(-1.8deg);
+  }
+  22% {
+    transform: translate3d(calc(-50% + var(--drift-x, 16px)), var(--drift-y, -24px), 0)
+      rotate(2.6deg);
+  }
+  48% {
+    transform: translate3d(calc(-50% + var(--drift-x-neg, -18px)), calc(var(--drift-y, -24px) * 0.3), 0)
+      rotate(-2.2deg);
+  }
+  74% {
+    transform: translate3d(calc(-50% + var(--drift-x, 16px) * 0.45), var(--drift-y-mid, -12px), 0)
+      rotate(1.8deg);
   }
 }
 
 @keyframes capsule-bubble {
   0% {
-    transform: translateY(8px);
+    transform: translate3d(0, 8px, 0);
     opacity: 0;
   }
-  25% {
-    opacity: 0.45;
+  22% {
+    opacity: 0.55;
   }
   100% {
-    transform: translateY(-28px);
+    transform: translate3d(var(--bubble-x, 6px), -36px, 0);
+    opacity: 0;
+  }
+}
+
+@keyframes sea-bubble {
+  0% {
+    transform: translate3d(0, 12px, 0);
+    opacity: 0;
+  }
+  18% {
+    opacity: 0.35;
+  }
+  100% {
+    transform: translate3d(8px, -120px, 0);
     opacity: 0;
   }
 }
 
 .capsule-float {
-  animation: capsule-float var(--float-ms, 5.6s) ease-in-out infinite;
+  animation: capsule-float var(--float-ms, 4.8s) ease-in-out infinite;
   animation-delay: var(--float-delay, 0s);
+  will-change: transform;
+}
+
+.capsule-drift {
+  animation: capsule-drift var(--drift-ms, 7.2s) ease-in-out infinite;
+  animation-delay: var(--drift-delay, 0s);
+  will-change: transform;
 }
 
 .capsule-bubble {
-  animation: capsule-bubble var(--bubble-ms, 3.8s) ease-out infinite;
+  animation: capsule-bubble var(--bubble-ms, 3.4s) ease-out infinite;
+}
+
+.sea-bubble {
+  animation: sea-bubble var(--sea-ms, 6.4s) ease-out infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .capsule-float,
-  .capsule-bubble {
-    animation: none;
+  .capsule-float {
+    --float-x: 4px;
+    --float-x-neg: -3px;
+    --float-y: -8px;
+    --float-y-mid: -3px;
+  }
+
+  .capsule-drift {
+    --drift-x: 6px;
+    --drift-x-neg: -6px;
+    --drift-y: -10px;
+    --drift-y-mid: -5px;
   }
 }
