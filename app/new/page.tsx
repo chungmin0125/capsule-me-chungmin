@@ -3,13 +3,21 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import type { User } from "firebase/auth";
 import { addDoc, collection, serverTimestamp, Timestamp } from "firebase/firestore";
 import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
 import { useAuth } from "@/components/auth-provider";
+import { LoginDialog } from "@/components/login-dialog";
+import { takeCapsuleDraft } from "@/lib/capsule-draft";
+import { bumpCapsuleCount } from "@/lib/capsule-stats";
 import { db, storage } from "@/lib/firebase";
+import { fetchWeatherSnapshot, snapshotForStorage } from "@/lib/live-weather";
+import { formatWeatherLine, type WeatherSnapshot } from "@/lib/weather";
+import { fallbackMemory, lookFromContents, memoryFromUnknown, type CapsuleMemory } from "@/lib/capsule-memory";
+import { KeywordRow, WeatherCapsule } from "@/components/weather-capsule";
+import { LiveWeatherPanel, useLiveWeather } from "@/components/live-weather";
 
 const MAX_PHOTOS = 10;
-const HOME_DELAY_MS = 2200;
 
 function fileExtension(file: File) {
   const dot = file.name.lastIndexOf(".");
@@ -43,6 +51,7 @@ function formatOpenAt(value: string) {
 export default function NewCapsulePage() {
   const router = useRouter();
   const { user, loading } = useAuth();
+  const { state: weatherState, load: reloadWeather } = useLiveWeather();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [recipient, setRecipient] = useState("");
@@ -53,12 +62,32 @@ export default function NewCapsulePage() {
   const [submitting, setSubmitting] = useState(false);
   const [uploadedCount, setUploadedCount] = useState(0);
   const [done, setDone] = useState(false);
+  const [savedWeather, setSavedWeather] = useState<WeatherSnapshot | null>(null);
+  const [savedMemory, setSavedMemory] = useState<CapsuleMemory | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<{
     recipient?: string;
     letter?: string;
     openAt?: string;
   }>({});
+  const [loginOpen, setLoginOpen] = useState(false);
+  const buryAfterLogin = useRef(false);
+
+  useEffect(() => {
+    const draft = takeCapsuleDraft();
+    if (!draft) return;
+    if (draft.recipient) setRecipient(draft.recipient);
+    if (draft.letter) setLetter(draft.letter);
+  }, []);
+
+  useEffect(() => {
+    if (!user || !buryAfterLogin.current) return;
+    buryAfterLogin.current = false;
+    setLoginOpen(false);
+    void buryCapsule(user);
+    // 로그인이 끝나는 순간에만 이어서 묻습니다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
 
   useEffect(() => {
     const urls = files.map((file) => URL.createObjectURL(file));
@@ -67,14 +96,6 @@ export default function NewCapsulePage() {
       urls.forEach((url) => URL.revokeObjectURL(url));
     };
   }, [files]);
-
-  useEffect(() => {
-    if (!done) return;
-    const timer = window.setTimeout(() => {
-      router.replace("/?buried=1");
-    }, HOME_DELAY_MS);
-    return () => window.clearTimeout(timer);
-  }, [done, router]);
 
   function validate() {
     const next: typeof fieldErrors = {};
@@ -108,21 +129,29 @@ export default function NewCapsulePage() {
     event.preventDefault();
     setError(null);
     if (loading) return;
+    if (!validate()) return;
     if (!user) {
-      alert("로그인 먼저");
+      buryAfterLogin.current = true;
+      setLoginOpen(true);
       return;
     }
-    if (!validate()) return;
+    await buryCapsule(user);
+  }
 
+  async function buryCapsule(owner: User) {
     setSubmitting(true);
     setUploadedCount(0);
     try {
+      const weather =
+        weatherState.status === "ready"
+          ? snapshotForStorage(weatherState.weather)
+          : await fetchWeatherSnapshot();
       const timestamp = Date.now();
       const urls: string[] = [];
 
       for (let index = 0; index < files.length; index += 1) {
         const file = files[index];
-        const path = `capsules/${user.uid}/${timestamp}_${index}.${fileExtension(file)}`;
+        const path = `capsules/${owner.uid}/${timestamp}_${index}.${fileExtension(file)}`;
         const fileRef = ref(storage, path);
         await uploadBytes(fileRef, file, {
           contentType: file.type || undefined,
@@ -131,17 +160,34 @@ export default function NewCapsulePage() {
         setUploadedCount(index + 1);
       }
 
+      const memory =
+        (await fetchCapsuleMemory({
+          recipient: recipient.trim(),
+          letter: letter.trim(),
+          weather,
+        })) ??
+        fallbackMemory({
+          letter: letter.trim(),
+          recipient: recipient.trim(),
+          weather,
+        });
+
       await addDoc(collection(db, "capsules"), {
-        ownerUid: user.uid,
+        ownerUid: owner.uid,
         recipient: recipient.trim(),
         letter: letter.trim(),
         photoUrls: urls,
         storageKey: String(timestamp),
         openAt: Timestamp.fromDate(new Date(openAt)),
         createdAt: serverTimestamp(),
+        weather,
+        geminiNote: memory?.line ?? null,
+        memory,
       });
+      await bumpCapsuleCount(1);
 
-      console.log(urls);
+      setSavedWeather(weather);
+      setSavedMemory(memory);
       setDone(true);
     } catch {
       setError("캡슐을 묻지 못했어요. 잠시 후 다시 시도해 주세요.");
@@ -166,15 +212,26 @@ export default function NewCapsulePage() {
             </>
           ) : null}
         </p>
-        <p className="mt-6 text-sm text-stone-400">
-          잠시 후 처음 화면으로 이동해요
-        </p>
+        {savedWeather ? (
+          <p className="mt-4 break-keep text-sm text-sky-800">
+            묻는 날 날씨 · {formatWeatherLine(savedWeather)}
+          </p>
+        ) : null}
+        {savedMemory ? (
+          <div className="mt-5 flex flex-col items-center gap-3">
+            <WeatherCapsule look={savedMemory.look} size="lg" seed={`${recipient}-${openAt}`} />
+            <p className="break-keep text-center text-sm leading-relaxed text-stone-600">
+              {savedMemory.line}
+            </p>
+            <KeywordRow keywords={savedMemory.keywords} align="center" />
+          </div>
+        ) : null}
         <button
           type="button"
           onClick={() => router.replace("/?buried=1")}
           className="mt-8 w-full rounded-full bg-amber-800 px-7 py-3 text-sm font-medium text-amber-50 shadow-sm transition hover:bg-amber-900"
         >
-          홈으로 가기
+          홈으로
         </button>
       </PageShell>
     );
@@ -193,26 +250,17 @@ export default function NewCapsulePage() {
           <p className="truncate text-xs text-stone-400">
             {user.displayName ?? user.email}
           </p>
-        ) : (
-          <p className="text-xs text-rose-500">로그인이 필요해요</p>
-        )}
+        ) : null}
       </div>
 
       <h1 className="mt-5 text-3xl font-semibold tracking-tight text-stone-800">
         캡슐 묻기
       </h1>
       <p className="mt-2 text-sm leading-relaxed text-stone-500">
-        사진과 편지를 넣고 열람일을 정해 주세요
+        사진과 편지를 넣고 열람일을 정해 주세요. 묻는 순간의 날씨와 편지가 캡슐 모습을 정해요.
       </p>
 
-      {!loading && !user ? (
-        <p className="mt-5 rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-700 ring-1 ring-rose-100">
-          로그인해야 캡슐을 묻을 수 있어요.{" "}
-          <Link href="/" className="font-medium underline underline-offset-2">
-            홈에서 로그인
-          </Link>
-        </p>
-      ) : null}
+      <LiveWeatherPanel state={weatherState} onReload={reloadWeather} />
 
       <form className="mt-8 flex flex-col gap-5" onSubmit={handleSubmit}>
         <label className="flex flex-col gap-2 text-left text-sm font-medium text-stone-600">
@@ -339,6 +387,12 @@ export default function NewCapsulePage() {
           </p>
         ) : null}
 
+        <CapsulePreview
+          recipient={recipient}
+          letter={letter}
+          weather={weatherState.status === "ready" ? weatherState.weather : null}
+        />
+
         <button
           type="submit"
           disabled={submitting || loading}
@@ -351,6 +405,16 @@ export default function NewCapsulePage() {
             : "캡슐 묻기"}
         </button>
       </form>
+
+      <LoginDialog
+        open={loginOpen}
+        title="이제 캡슐을 묻을 차례예요"
+        description="적은 편지와 고른 사진은 그대로 남아 있어요. Google로 로그인하면 바로 묻어 둘게요."
+        onClose={() => {
+          buryAfterLogin.current = false;
+          setLoginOpen(false);
+        }}
+      />
     </PageShell>
   );
 }
@@ -363,4 +427,69 @@ function PageShell({ children }: { children: React.ReactNode }) {
       </main>
     </div>
   );
+}
+
+function CapsulePreview({
+  recipient,
+  letter,
+  weather,
+}: {
+  recipient: string;
+  letter: string;
+  weather: WeatherSnapshot | null;
+}) {
+  const look = lookFromContents({
+    weather,
+    letter,
+    recipient,
+  });
+
+  return (
+    <section className="rounded-3xl bg-amber-50/70 px-5 py-5 text-center ring-1 ring-amber-100">
+      <p className="text-xs font-medium tracking-wide text-amber-900/70">묻힐 캡슐 미리보기</p>
+      <div className="mt-4 flex justify-center">
+        <WeatherCapsule
+          look={look}
+          size="md"
+          seed={`${recipient}-${letter.slice(0, 24)}`}
+        />
+      </div>
+      <p className="mt-3 break-keep text-xs leading-5 text-stone-500">
+        {recipient.trim() ? `To. ${recipient.trim()}` : "받는 사람과 편지를 적으면 빛깔이 바뀌어요"}
+      </p>
+    </section>
+  );
+}
+
+async function fetchCapsuleMemory(input: {
+  recipient: string;
+  letter: string;
+  weather: WeatherSnapshot | null;
+}) {
+  try {
+    const response = await fetch("/api/capsule-note", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    if (!response.ok) return null;
+    const payload = (await response.json()) as { memory?: CapsuleMemory };
+    const parsed =
+      memoryFromUnknown(payload.memory, input.weather) ??
+      fallbackMemory({
+        letter: input.letter,
+        recipient: input.recipient,
+        weather: input.weather,
+      });
+    return {
+      ...parsed,
+      look: lookFromContents({
+        weather: input.weather,
+        letter: input.letter,
+        recipient: input.recipient,
+      }),
+    };
+  } catch {
+    return null;
+  }
 }

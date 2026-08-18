@@ -2,26 +2,21 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { getSignInErrorMessage, useAuth } from "@/components/auth-provider";
+import { useRouter } from "next/navigation";
+import { useAuth } from "@/components/auth-provider";
 import { CapsuleDashboard } from "@/components/capsule-dashboard";
 import { DevModeToggle, useDevMode } from "@/components/dev-mode";
+import { LoginDialog } from "@/components/login-dialog";
+import { LiveWeatherCard } from "@/components/live-weather";
+import { WeatherCapsule } from "@/components/weather-capsule";
+import { lookFromWeather } from "@/lib/capsule-memory";
+import { useCapsuleTotalCount } from "@/lib/capsule-stats";
+import { saveCapsuleDraft } from "@/lib/capsule-draft";
 
 export function HomeScreen({ justBuried = false }: { justBuried?: boolean }) {
-  const { user, loading, signInWithGoogle, signOut } = useAuth();
+  const { user, loading, signOut } = useAuth();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  async function handleGoogleSignIn() {
-    setError(null);
-    setPending(true);
-    try {
-      await signInWithGoogle();
-    } catch (caught) {
-      setError(getSignInErrorMessage(caught));
-    } finally {
-      setPending(false);
-    }
-  }
 
   async function handleSignOut() {
     setError(null);
@@ -35,7 +30,15 @@ export function HomeScreen({ justBuried = false }: { justBuried?: boolean }) {
     }
   }
 
-  if (!loading && user) {
+  if (loading) {
+    return (
+      <div className="flex min-h-full flex-1 items-center justify-center bg-linear-to-b from-amber-50 via-rose-50 to-stone-100 px-6 py-16">
+        <p className="text-sm text-stone-400">잠시만요...</p>
+      </div>
+    );
+  }
+
+  if (user) {
     return (
       <DashboardHome
         displayName={user.displayName}
@@ -49,26 +52,131 @@ export function HomeScreen({ justBuried = false }: { justBuried?: boolean }) {
     );
   }
 
+  return <GuestHome />;
+}
+
+function GuestHome() {
+  const router = useRouter();
+  const { count, loading: countLoading } = useCapsuleTotalCount();
+  const [recipient, setRecipient] = useState("");
+  const [letter, setLetter] = useState("");
+  const [loginOpen, setLoginOpen] = useState(false);
+  const look = lookFromWeather(null);
+
+  function startTrial() {
+    saveCapsuleDraft({ recipient, letter });
+    router.push("/new");
+  }
+
   return (
     <div className="flex min-h-full flex-1 items-center justify-center bg-linear-to-b from-amber-50 via-rose-50 to-stone-100 px-6 py-16">
-      <main className="w-full max-w-md rounded-3xl bg-white/80 px-10 py-14 text-center shadow-xl shadow-amber-900/10 ring-1 ring-amber-100/80 backdrop-blur-sm">
-        <h1 className="text-5xl font-semibold tracking-tight text-stone-800">
+      <main className="w-full max-w-md rounded-3xl bg-white/80 px-8 py-12 text-center shadow-xl shadow-amber-900/10 ring-1 ring-amber-100/80 backdrop-blur-sm">
+        <p className="text-sm text-stone-400">타임캡슐</p>
+        <h1 className="mt-1 text-5xl font-semibold tracking-tight text-stone-800">
           캡슐 미
         </h1>
-        <p className="mt-5 text-base leading-relaxed text-stone-500">
+        <p className="mt-4 text-base leading-relaxed text-stone-500">
           사진과 편지를 묻고 열람일에 함께 열어요
         </p>
 
-        {loading ? (
-          <p className="mt-10 text-sm text-stone-400">잠시만요...</p>
-        ) : (
-          <SignedOutView
-            pending={pending}
-            error={error}
-            onSignIn={handleGoogleSignIn}
-          />
-        )}
+        <div className="mt-8 flex justify-center">
+          <WeatherCapsule look={look} seed="home-guest" />
+        </div>
+
+        <CapsuleCount count={count} loading={countLoading} />
+
+        <form
+          className="mt-8 flex flex-col gap-3 text-left"
+          onSubmit={(event) => {
+            event.preventDefault();
+            startTrial();
+          }}
+        >
+          <label className="flex flex-col gap-2 text-sm font-medium text-stone-600">
+            받는 사람
+            <input
+              type="text"
+              value={recipient}
+              onChange={(event) => setRecipient(event.target.value)}
+              placeholder="누구에게 보낼까요?"
+              className="rounded-2xl border border-stone-200 bg-white px-4 py-3 text-sm font-normal text-stone-800 outline-none ring-amber-200 transition placeholder:text-stone-300 focus:ring-2"
+            />
+          </label>
+          <label className="flex flex-col gap-2 text-sm font-medium text-stone-600">
+            편지
+            <textarea
+              value={letter}
+              onChange={(event) => setLetter(event.target.value)}
+              rows={4}
+              placeholder="지금 하고 싶은 말을 남겨 주세요"
+              className="resize-y rounded-2xl border border-stone-200 bg-white px-4 py-3 text-sm font-normal text-stone-800 outline-none ring-amber-200 transition placeholder:text-stone-300 focus:ring-2"
+            />
+          </label>
+          <button
+            type="submit"
+            className="mt-2 rounded-full bg-amber-800 px-7 py-3 text-sm font-medium text-amber-50 shadow-sm transition hover:bg-amber-900"
+          >
+            캡슐 묻어보기
+          </button>
+        </form>
+
+        <p className="mt-4 break-keep text-xs leading-5 text-stone-400">
+          열람일과 사진을 고른 뒤, 묻을 때 로그인하면 돼요
+        </p>
+
+        <button
+          type="button"
+          onClick={() => setLoginOpen(true)}
+          className="mt-5 text-sm text-stone-400 underline-offset-2 transition hover:text-stone-600 hover:underline"
+        >
+          이미 묻은 캡슐이 있다면 로그인
+        </button>
       </main>
+
+      <LoginDialog
+        open={loginOpen}
+        title="내 캡슐을 보려면 로그인해요"
+        description="Google 계정으로 들어오면 지금까지 묻어 둔 캡슐을 다시 볼 수 있어요."
+        onClose={() => setLoginOpen(false)}
+      />
+    </div>
+  );
+}
+
+function CapsuleCount({
+  count,
+  loading,
+}: {
+  count: number | null;
+  loading: boolean;
+}) {
+  if (loading) {
+    return <p className="mt-6 text-sm text-stone-400">묻힌 캡슐을 세는 중...</p>;
+  }
+
+  if (count == null) {
+    return (
+      <p className="mt-6 break-keep text-sm leading-6 text-stone-500">
+        지금 이 순간에도 누군가의 오늘이 묻히고 있어요
+      </p>
+    );
+  }
+
+  if (count === 0) {
+    return (
+      <p className="mt-6 break-keep text-sm leading-6 text-stone-500">
+        아직 묻힌 캡슐이 없어요. 첫 캡슐을 남겨 보세요.
+      </p>
+    );
+  }
+
+  return (
+    <div className="mt-6">
+      <p className="text-sm text-stone-400">지금까지 묻힌 캡슐</p>
+      <p className="mt-1 text-4xl font-semibold tracking-tight text-amber-900">
+        {count.toLocaleString("ko-KR")}
+      </p>
+      <p className="mt-1 text-sm text-stone-500">개의 오늘이 잠들어 있어요</p>
     </div>
   );
 }
@@ -94,8 +202,8 @@ function DashboardHome({
   const name = displayName ?? email ?? "친구";
 
   return (
-    <div className="min-h-full flex-1 bg-linear-to-b from-amber-50 via-rose-50 to-stone-100 px-6 py-10">
-      <div className="mx-auto w-full max-w-3xl">
+    <div className="min-h-full flex-1 bg-linear-to-b from-sky-100 via-amber-50 to-stone-200 px-6 py-10">
+      <div className="mx-auto w-full max-w-5xl">
         <header className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="text-sm text-stone-400">타임캡슐</p>
@@ -154,57 +262,10 @@ function DashboardHome({
         </section>
         {error ? <p className="mt-3 text-sm text-rose-600">{error}</p> : null}
 
+        <LiveWeatherCard />
+
         <CapsuleDashboard />
       </div>
     </div>
-  );
-}
-
-function SignedOutView({
-  pending,
-  error,
-  onSignIn,
-}: {
-  pending: boolean;
-  error: string | null;
-  onSignIn: () => void;
-}) {
-  return (
-    <div className="mt-10">
-      <p className="text-sm text-stone-500">Google 계정으로 시작해 주세요</p>
-      <button
-        type="button"
-        onClick={onSignIn}
-        disabled={pending}
-        className="mt-5 inline-flex w-full items-center justify-center gap-3 rounded-full bg-white px-5 py-3 text-sm font-medium text-stone-700 shadow-sm ring-1 ring-stone-200 transition hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-60"
-      >
-        <GoogleMark />
-        {pending ? "로그인 중..." : "Google로 계속하기"}
-      </button>
-      {error ? <p className="mt-4 text-sm text-rose-600">{error}</p> : null}
-    </div>
-  );
-}
-
-function GoogleMark() {
-  return (
-    <svg aria-hidden="true" width="18" height="18" viewBox="0 0 18 18">
-      <path
-        fill="#4285F4"
-        d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.615z"
-      />
-      <path
-        fill="#34A853"
-        d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.258c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332C2.438 15.983 5.482 18 9 18z"
-      />
-      <path
-        fill="#FBBC05"
-        d="M3.964 10.707c-.18-.54-.282-1.117-.282-1.707s.102-1.167.282-1.707V4.961H.957C.347 6.175 0 7.55 0 9s.348 2.825.957 4.039l3.007-2.332z"
-      />
-      <path
-        fill="#EA4335"
-        d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.961L3.964 7.293C4.672 5.163 6.656 3.58 9 3.58z"
-      />
-    </svg>
   );
 }
