@@ -24,3 +24,43 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+@keyframes capsule-float {
+  0%,
+  100% {
+    transform: translateY(0) rotate(var(--float-rot-a, -2.2deg));
+  }
+  50% {
+    transform: translateY(var(--float-y, -12px)) rotate(var(--float-rot-b, 2.4deg));
+  }
+}
+
+@keyframes capsule-bubble {
+  0% {
+    transform: translateY(8px);
+    opacity: 0;
+  }
+  25% {
+    opacity: 0.45;
+  }
+  100% {
+    transform: translateY(-28px);
+    opacity: 0;
+  }
+}
+
+.capsule-float {
+  animation: capsule-float var(--float-ms, 5.6s) ease-in-out infinite;
+  animation-delay: var(--float-delay, 0s);
+}
+
+.capsule-bubble {
+  animation: capsule-bubble var(--bubble-ms, 3.8s) ease-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .capsule-float,
+  .capsule-bubble {
+    animation: none;
+  }
+}

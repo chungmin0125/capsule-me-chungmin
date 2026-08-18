@@ -7,8 +7,10 @@ import { doc, onSnapshot } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import {
   capsuleFromDoc,
-  formatCountdown,
+  capsuleLook,
+  capsuleMemory,
   formatDateTime,
+  formatTimer,
   isOpenable,
   remainingMs,
   type Capsule,
@@ -17,6 +19,9 @@ import { useNow } from "@/lib/use-now";
 import { useAuth } from "@/components/auth-provider";
 import { DeleteCapsuleButton } from "@/components/delete-capsule-button";
 import { DevModeToggle, useDevMode } from "@/components/dev-mode";
+import { KeywordRow, WeatherCapsule } from "@/components/weather-capsule";
+import { WeatherSummary } from "@/components/weather-summary";
+import type { CapsuleLook } from "@/lib/capsule-memory";
 
 export function CapsuleDetail({ id }: { id: string }) {
   const router = useRouter();
@@ -102,27 +107,47 @@ export function CapsuleDetail({ id }: { id: string }) {
   const opened = ready || forcedOpen;
 
   if (!opened) {
+    const timer = formatTimer(remainingMs(capsule, now));
+    const look = capsuleLook(capsule);
+    const memory = capsuleMemory(capsule);
+
     return (
-      <DetailShell>
+      <DetailShell tone={look}>
         <Header />
         <div className="mt-8 flex justify-center">
-          <div className="flex h-28 w-16 items-center justify-center rounded-full bg-amber-800 shadow-lg ring-4 ring-amber-100">
-            <span className="h-14 w-2 rounded-full bg-amber-100/90" />
-          </div>
+          <WeatherCapsule look={look} size="lg" seed={capsule.id} />
         </div>
-        <p className="mt-8 text-center text-sm font-medium text-amber-800">
+        <p className="mt-6 text-center text-sm font-medium text-amber-800">
           아직 잠겨 있어요
         </p>
         <h1 className="mt-2 text-center text-3xl font-semibold tracking-tight text-stone-800">
           To. {capsule.recipient}
         </h1>
-        <p className="mt-6 break-keep text-center text-3xl font-semibold leading-snug tracking-tight text-stone-800">
-          {formatCountdown(remainingMs(capsule, now))}
+        {memory.line ? (
+          <p className="mt-4 break-keep text-center text-sm leading-relaxed text-stone-600">
+            {memory.line}
+          </p>
+        ) : null}
+        <div className="mt-4">
+          <KeywordRow keywords={memory.keywords} align="center" />
+        </div>
+        <p className="mt-3 break-keep text-center text-xs text-stone-400">
+          키워드만 보여요. 편지와 사진은 열람일에 열려요.
         </p>
-        <p className="mt-2 text-center text-sm text-stone-400">남았어요</p>
+        <div className="mt-8 grid grid-cols-4 gap-2">
+          <TimeUnit value={timer.days} label="일" />
+          <TimeUnit value={timer.hours} label="시" />
+          <TimeUnit value={timer.minutes} label="분" />
+          <TimeUnit value={timer.seconds} label="초" />
+        </div>
         <p className="mt-6 text-center text-sm text-stone-500">
           열람일 {formatDateTime(capsule.openAt)}
         </p>
+        {capsule.weather ? (
+          <div className="mt-6">
+            <WeatherSummary weather={capsule.weather} />
+          </div>
+        ) : null}
 
         {devMode ? (
           <button
@@ -149,8 +174,16 @@ export function CapsuleDetail({ id }: { id: string }) {
     );
   }
 
+  const openedMemory = capsuleMemory(capsule);
+  const openedLook = capsuleLook(capsule);
+
   return (
-    <div className="min-h-full bg-linear-to-b from-amber-50 via-rose-50 to-stone-100 px-6 py-12">
+    <div
+      className="min-h-full px-6 py-12"
+      style={{
+        background: `linear-gradient(180deg, ${openedLook.from} 0%, #faf6f1 42%, #f5f0e8 100%)`,
+      }}
+    >
       <article className="mx-auto w-full max-w-lg">
         <Header />
 
@@ -163,12 +196,31 @@ export function CapsuleDetail({ id }: { id: string }) {
           <p className="mt-5 text-sm font-medium text-amber-800">열린 캡슐</p>
         )}
 
+        <div className="mt-6 flex justify-center">
+          <WeatherCapsule look={openedLook} size="lg" seed={capsule.id} />
+        </div>
+
         <h1 className="mt-3 text-4xl font-semibold tracking-tight text-stone-800">
           To. {capsule.recipient}
         </h1>
         <p className="mt-2 text-sm text-stone-400">
           열람일 {formatDateTime(capsule.openAt)}
         </p>
+        {capsule.weather ? (
+          <div className="mt-6">
+            <WeatherSummary weather={capsule.weather} />
+          </div>
+        ) : null}
+        {openedMemory.line ? (
+          <p className="mt-6 break-keep rounded-2xl bg-[#fffaf3] px-4 py-3 text-sm leading-relaxed text-stone-700 ring-1 ring-amber-100">
+            {openedMemory.line}
+          </p>
+        ) : null}
+        {openedMemory.keywords.length ? (
+          <div className="mt-4">
+            <KeywordRow keywords={openedMemory.keywords} />
+          </div>
+        ) : null}
 
         {capsule.photoUrls.length > 0 ? (
           <div className="mt-8 flex gap-3 overflow-x-auto pb-2">
@@ -213,6 +265,17 @@ export function CapsuleDetail({ id }: { id: string }) {
   );
 }
 
+function TimeUnit({ value, label }: { value: number; label: string }) {
+  return (
+    <div className="rounded-2xl bg-amber-50 px-1 py-3 ring-1 ring-amber-100">
+      <p className="font-mono text-2xl font-semibold tabular-nums text-stone-800">
+        {String(value).padStart(2, "0")}
+      </p>
+      <p className="mt-1 text-[11px] text-stone-500">{label}</p>
+    </div>
+  );
+}
+
 function Header() {
   return (
     <div className="flex items-center justify-between">
@@ -238,9 +301,24 @@ function HomeLink() {
   );
 }
 
-function DetailShell({ children }: { children: React.ReactNode }) {
+function DetailShell({
+  children,
+  tone,
+}: {
+  children: React.ReactNode;
+  tone?: CapsuleLook;
+}) {
   return (
-    <div className="flex min-h-full flex-1 items-center justify-center bg-linear-to-b from-amber-50 via-rose-50 to-stone-100 px-6 py-16">
+    <div
+      className={`flex min-h-full flex-1 items-center justify-center px-6 py-16 ${
+        tone ? "" : "bg-linear-to-b from-amber-50 via-rose-50 to-stone-100"
+      }`}
+      style={{
+        background: tone
+          ? `linear-gradient(180deg, ${tone.from} 0%, #faf6f1 55%, #f5f0e8 100%)`
+          : undefined,
+      }}
+    >
       <main className="w-full max-w-md rounded-3xl bg-white/80 px-8 py-10 text-center shadow-xl shadow-amber-900/10 ring-1 ring-amber-100/80 backdrop-blur-sm">
         {children}
       </main>
